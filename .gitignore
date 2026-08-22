@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+.venv/
+venv/
+
+# Local editor and OS noise.
+.DS_Store
+
+# Local secrets and configuration. The .example files are the committed contract.
+.env
+.env.*
+!.env.example
+!.env.secrets.example
