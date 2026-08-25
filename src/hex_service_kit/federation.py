@@ -224,11 +224,31 @@ class FederationPolicy:
     #: authenticated machine caller", which is the correct posture only where an upstream
     #: invoker binding is already the boundary.
     allowed_machine_subjects: tuple[str, ...] = ()
+    #: Take the hosted domain itself as the tenant when no mapping names it. OFF by default,
+    #: and opt-in rather than a fallback, because the two readings differ in who decides.
+    #:
+    #: With a map, the deployment decides which domains are tenants and an unlisted one gets
+    #: nothing. With passthrough, the ASSERTION decides: every domain that can reach this
+    #: service becomes a tenant of the same name, and the boundary is entirely whatever the
+    #: edge admits. That is defensible where IAP already restricts the audience to one
+    #: organisation and the domain IS the tenant id -- several deployments in this fleet are
+    #: exactly that, and refusing to express it would have forced them to keep their own
+    #: copy of this function. It is not defensible as a default, and it must never be a
+    #: silent fallback for a map that was meant to be configured and was not: a missing map
+    #: would then widen access instead of failing closed.
+    tenant_from_hosted_domain: bool = False
 
     def tenant_for(self, hosted_domain: str, *, machine: bool = False) -> str:
         if machine:
             return self.machine_tenant
-        return self.domain_tenants.get(hosted_domain.lower(), "")
+        domain = hosted_domain.lower()
+        mapped = self.domain_tenants.get(domain, "")
+        if mapped:
+            return mapped
+        # The map still wins where it has an answer, so enabling passthrough never overrides
+        # a reviewed mapping -- it only decides what happens for a domain the map is silent
+        # about, and only when a deployment has said that is what it wants.
+        return domain if self.tenant_from_hosted_domain else ""
 
     def groups_for(self, hosted_domain: str) -> tuple[str, ...]:
         return tuple(self.domain_groups.get(hosted_domain.lower(), ()))

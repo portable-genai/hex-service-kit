@@ -262,3 +262,52 @@ def test_only_a_different_origin_is_cross_origin(origin: str, own: str, expected
     application/json, and the console never hydrates while everything else succeeds."""
 
     assert is_cross_origin(origin, own) is expected
+
+
+# --------------------------------------------------------------------------------------- #
+# Taking the hosted domain as the tenant.
+#
+# Found during fleet adoption, by an agent that refused to adopt the claim-to-principal half
+# because it would have silently emptied the tenant. Several adapters derive the tenant from
+# the `hd` claim directly and configure no domain map, and FederationPolicy could not express
+# that at all -- so the choice was a regression or keeping the local copy. Both were wrong.
+# --------------------------------------------------------------------------------------- #
+def test_the_hosted_domain_is_not_a_tenant_by_default() -> None:
+    """Off unless asked for. The default must fail closed, whatever a caller forgets."""
+
+    assert principal_from_iap_claims(_claims(), FederationPolicy()).tenant == ""
+
+
+def test_passthrough_makes_the_hosted_domain_the_tenant() -> None:
+    """The shape several deployments in this fleet actually have: the domain IS the tenant."""
+
+    policy = FederationPolicy(tenant_from_hosted_domain=True)
+
+    assert principal_from_iap_claims(_claims(), policy).tenant == "corp.example"
+
+
+def test_a_reviewed_mapping_still_wins_over_passthrough() -> None:
+    """Enabling passthrough must not override a decision somebody wrote down.
+
+    Otherwise a deployment that maps one domain deliberately and enables passthrough for the
+    rest would find its explicit mapping ignored -- the reverse of what either setting means.
+    """
+
+    policy = FederationPolicy(
+        domain_tenants={"corp.example": "reference-bank"}, tenant_from_hosted_domain=True
+    )
+
+    assert principal_from_iap_claims(_claims(), policy).tenant == "reference-bank"
+
+
+def test_passthrough_does_not_invent_a_tenant_for_a_machine_caller() -> None:
+    """A machine identity carries no hosted domain, so there is nothing to pass through.
+
+    Passing through an empty domain would make every service account a tenant of "", which
+    is a tenant boundary that matches every other unmapped caller.
+    """
+
+    policy = FederationPolicy(tenant_from_hosted_domain=True)
+    claims = _claims(email="svc@p.iam.gserviceaccount.com", hd="")
+
+    assert principal_from_iap_claims(claims, policy).tenant == ""
