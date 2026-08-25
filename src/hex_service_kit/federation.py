@@ -238,26 +238,58 @@ class FederationPolicy:
     #: would then widen access instead of failing closed.
     tenant_from_hosted_domain: bool = False
 
-    def tenant_for(self, hosted_domain: str, *, machine: bool = False) -> str:
+    def tenant_for(
+        self, hosted_domain: str, *, email_domain: str = "", machine: bool = False
+    ) -> str:
+        """The tenant for a verified caller, from the two domains kept deliberately apart.
+
+        ``hosted_domain`` is the ``hd`` claim: the provider asserting this account belongs to
+        an organisation. ``email_domain`` is derived from the address and asserts nothing.
+
+        The reviewed map may consult either, because an entry in it is a deployment vouching
+        for that domain by name. **Passthrough consults only the asserted one.** Merging them
+        was a widening: a token with no ``hd`` -- a personal account the edge admits, an
+        external federated identity -- would go from no tenant to a tenant named after its
+        mail domain, silently, at a tenancy boundary. Anyone able to receive mail at a domain
+        they control would have become a tenant of it.
+        """
         if machine:
             return self.machine_tenant
-        domain = hosted_domain.lower()
-        mapped = self.domain_tenants.get(domain, "")
-        if mapped:
-            return mapped
+        asserted = hosted_domain.lower()
+        derived = email_domain.lower()
         # The map still wins where it has an answer, so enabling passthrough never overrides
         # a reviewed mapping -- it only decides what happens for a domain the map is silent
         # about, and only when a deployment has said that is what it wants.
-        return domain if self.tenant_from_hosted_domain else ""
+        for domain in (asserted, derived):
+            if domain and (mapped := self.domain_tenants.get(domain, "")):
+                return mapped
+        if self.tenant_from_hosted_domain and asserted:
+            return asserted
+        return ""
 
-    def groups_for(self, hosted_domain: str) -> tuple[str, ...]:
-        return tuple(self.domain_groups.get(hosted_domain.lower(), ()))
+    def groups_for(self, hosted_domain: str, email_domain: str = "") -> tuple[str, ...]:
+        """Groups may be keyed on either domain: every entry is one a deployment wrote down,
+        so neither lookup can grant a role nobody named."""
+        for domain in (hosted_domain.lower(), email_domain.lower()):
+            if domain and (groups := self.domain_groups.get(domain, ())):
+                return tuple(groups)
+        return ()
 
 
-def _hosted_domain(claims: Mapping[str, object], email: str) -> str:
-    explicit = str(claims.get("hd") or "").strip().lower()
-    if explicit:
-        return explicit
+def _hosted_domain(claims: Mapping[str, object]) -> str:
+    """The ``hd`` claim: the identity provider's assertion that this account belongs to a
+    Workspace domain. Absent for a personal account and for most external federated ones."""
+    return str(claims.get("hd") or "").strip().lower()
+
+
+def _email_domain(email: str) -> str:
+    """The domain half of the email address, which is a DERIVED value and not a claim.
+
+    Kept strictly apart from :func:`_hosted_domain` because the two carry different weight and
+    merging them was a silent widening at a tenancy boundary. A token with no ``hd`` -- a
+    personal account the edge admits, or an external federated identity -- has no organisation
+    asserted about it at all, and taking its mail domain as an organisation invents one.
+    """
     _, _, domain = email.partition("@")
     return domain.strip().lower()
 
@@ -267,6 +299,8 @@ def principal_from_iap_claims(
     policy: FederationPolicy,
     *,
     source: str = "iap",
+    assurance: str = "iap",
+    include_subject_principal: bool = True,
 ) -> Principal:
     """Turn a VERIFIED claim set into a :class:`Principal`, or refuse it.
 
@@ -278,6 +312,17 @@ def principal_from_iap_claims(
     IAP, produces no principal at all -- never an anonymous or partially-entitled one --
     because a principal that exists but holds nothing is indistinguishable, at the point it
     is refused a resource, from a correctly-configured user who lacks a role.
+
+    ``assurance`` is what the resulting principal carries when the assertion names no ``acr``,
+    which IAP assertions in practice do not. It defaults to ``"iap"`` because that names the
+    MECHANISM that authenticated the caller, which is what a step-up check needs to know and
+    what every adapter in this fleet already recorded; reading ``acr`` alone produced an empty
+    string and would have silently emptied the field for every one of them.
+
+    ``include_subject_principal`` decides whether ``user:<subject>`` joins the entitlement
+    principals. Adapters differ on this deliberately -- one family grants it, another leaves
+    the tuple to the group map alone -- and it is an authorization decision, so it is a
+    parameter rather than a default this function picks for a caller.
     """
     issuer = str(claims.get("iss") or "")
     if issuer != IAP_ISSUER:
@@ -294,15 +339,17 @@ def principal_from_iap_claims(
     if machine and policy.allowed_machine_subjects and email not in policy.allowed_machine_subjects:
         raise IdentityError(f"machine caller {email!r} is not in the reviewed allowlist")
 
-    domain = _hosted_domain(claims, email)
-    tenant = policy.tenant_for(domain, machine=machine)
-    groups = policy.groups_for(domain)
-    principals = (f"user:{email or subject}", *groups)
+    hosted = _hosted_domain(claims)
+    derived = _email_domain(email)
+    tenant = policy.tenant_for(hosted, email_domain=derived, machine=machine)
+    groups = policy.groups_for(hosted, derived)
+    subject_id = email or subject
+    principals = ((f"user:{subject_id}",) if include_subject_principal else ()) + groups
     return Principal(
-        subject=email or subject,
+        subject=subject_id,
         principals=principals,
         tenant=tenant,
-        assurance=str(claims.get("acr") or ""),
+        assurance=str(claims.get("acr") or "") or assurance,
         source=source,
     )
 

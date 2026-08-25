@@ -311,3 +311,93 @@ def test_passthrough_does_not_invent_a_tenant_for_a_machine_caller() -> None:
     claims = _claims(email="svc@p.iam.gserviceaccount.com", hd="")
 
     assert principal_from_iap_claims(claims, policy).tenant == ""
+
+
+# --------------------------------------------------------------------------------------- #
+# The two domains, and why they are not one.
+#
+# Found during the second adoption wave, by an agent that executed the kit against six claim
+# sets rather than trusting the release note. `_hosted_domain` fell back to the email domain
+# BEFORE the policy was consulted, so `tenant_from_hosted_domain=True` did not mean "the hd
+# claim is the tenant" -- it meant "the hd claim OR the mail domain is the tenant". A token
+# with no hd went from no tenant to a tenant named after its mail domain, silently, at a
+# tenancy boundary.
+# --------------------------------------------------------------------------------------- #
+def test_passthrough_never_promotes_a_mail_domain_to_a_tenant() -> None:
+    """The widening, closed. No `hd` means no organisation was asserted about this caller.
+
+    A personal account the edge admits, or an external federated identity, carries no `hd`.
+    Anyone able to receive mail at a domain they control would otherwise have become a tenant
+    of it just by signing in.
+    """
+
+    policy = FederationPolicy(tenant_from_hosted_domain=True)
+    claims = _claims(hd="", email="someone@corp.example")
+
+    assert principal_from_iap_claims(claims, policy).tenant == ""
+
+
+def test_passthrough_uses_the_asserted_domain_when_there_is_one() -> None:
+    """The half that must keep working: `hd` present is an assertion, and it is honoured."""
+
+    policy = FederationPolicy(tenant_from_hosted_domain=True)
+
+    assert principal_from_iap_claims(_claims(hd="corp.example"), policy).tenant == "corp.example"
+
+
+def test_a_reviewed_map_may_still_key_on_the_mail_domain() -> None:
+    """The map is a deployment vouching for a domain BY NAME, so the weaker signal is safe
+    there. It is only passthrough -- where the assertion decides -- that must refuse it."""
+
+    policy = FederationPolicy(domain_tenants={"corp.example": "reference-bank"})
+
+    assert principal_from_iap_claims(_claims(hd=""), policy).tenant == "reference-bank"
+
+
+def test_the_asserted_domain_is_consulted_before_the_derived_one() -> None:
+    """When they disagree, the claim wins. A mail domain cannot redirect a mapped tenant."""
+
+    policy = FederationPolicy(
+        domain_tenants={"corp.example": "reference-bank", "other.example": "someone-else"}
+    )
+    claims = _claims(hd="corp.example", email="user@other.example")
+
+    assert principal_from_iap_claims(claims, policy).tenant == "reference-bank"
+
+
+# --------------------------------------------------------------------------------------- #
+# Assurance and the subject principal: two fields adoption could not express.
+# --------------------------------------------------------------------------------------- #
+def test_assurance_names_the_mechanism_when_the_assertion_names_no_acr() -> None:
+    """IAP assertions carry no `acr` in practice, so reading it alone emptied the field.
+
+    32 repositories assert `principal.assurance == "iap"`, and they were right to: what a
+    step-up check needs to know is which mechanism authenticated the caller.
+    """
+
+    assert principal_from_iap_claims(_claims(), FederationPolicy()).assurance == "iap"
+
+
+def test_an_asserted_acr_still_wins_over_the_default() -> None:
+    """Where the provider does say something richer, it is not discarded."""
+
+    claims = _claims(acr="phr")
+
+    assert principal_from_iap_claims(claims, FederationPolicy()).assurance == "phr"
+
+
+def test_the_subject_principal_can_be_left_out() -> None:
+    """An authorization decision, so it is a parameter rather than one this function picks.
+
+    Two adapter families differ deliberately: one grants `user:<subject>`, the other leaves
+    the tuple to the group map alone. Normalising them would have deleted a verified
+    identity's own principal in half the fleet.
+    """
+
+    policy = FederationPolicy(domain_groups={"corp.example": ("group:analyst",)})
+
+    with_subject = principal_from_iap_claims(_claims(), policy)
+    without = principal_from_iap_claims(_claims(), policy, include_subject_principal=False)
+
+    assert with_subject.principals == ("user:analyst@corp.example", "group:analyst")
+    assert without.principals == ("group:analyst",)

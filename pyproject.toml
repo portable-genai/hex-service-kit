@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hex-service-kit"
-version = "0.0.3"
+version = "0.0.4"
 description = "The shared service spine for hexagonal agent repos: a server-verified identity layer (Principal / IdentityPort / seeded dev personas that discard the client-asserted actor), service-to-service transport hardening (https-only base URLs, bearer + HMAC-signed actor propagation, fail-closed caller authentication), fail-closed network defaults (loopback bind with an explicit insecure-demo guard, a CORS allowlist that can never fall back to '*'), and kernel primitives (a StrEnum base and an append-only hash-chained WORM audit log). Pure standard library core, with an optional FastAPI integration layer."
 readme = "README.md"
 requires-python = ">=3.12"
