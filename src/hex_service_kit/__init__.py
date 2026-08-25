@@ -44,6 +44,7 @@ from . import (
     capabilities,
     enums,
     evals,
+    federation,
     identity,
     logging,
     netdefaults,
@@ -74,6 +75,25 @@ from .audit import (
 from .capabilities import AssuranceLevel, Capability, CapabilityManifest, CapabilityMode
 from .enums import LenientStrEnum, StrEnum
 from .evals import EvalMetricEvidence, EvalRunEnvelope, EvalRunStatus
+from .federation import (
+    CLIENT_SPOOFABLE_IDENTITY,
+    HOP_BY_HOP_REQUEST,
+    HOP_BY_HOP_RESPONSE,
+    IAP_ASSERTION_HEADER,
+    IAP_ISSUER,
+    IAP_KEYS_URL,
+    PLATFORM_RESERVED_PATHS,
+    PORTAL_ASSERTION_HEADER,
+    AssertionSource,
+    FederationPolicy,
+    InjectionPlan,
+    build_injection_plan,
+    is_cross_origin,
+    principal_from_iap_claims,
+    sanitize_request_headers,
+    sanitize_response_headers,
+    select_assertion,
+)
 from .identity import (
     ANONYMOUS,
     DEFAULT_PERSONAS,
@@ -98,9 +118,27 @@ from .observability import ObservabilityTracerPort, TokenUsage
 from .s2s import client_headers, validate_base_url
 from .serialization import dataclass_from_jsonable, to_jsonable
 
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 
 __all__ = [
+    "federation",
+    "AssertionSource",
+    "FederationPolicy",
+    "InjectionPlan",
+    "IAP_ASSERTION_HEADER",
+    "PORTAL_ASSERTION_HEADER",
+    "IAP_ISSUER",
+    "IAP_KEYS_URL",
+    "CLIENT_SPOOFABLE_IDENTITY",
+    "HOP_BY_HOP_REQUEST",
+    "HOP_BY_HOP_RESPONSE",
+    "PLATFORM_RESERVED_PATHS",
+    "build_injection_plan",
+    "is_cross_origin",
+    "principal_from_iap_claims",
+    "sanitize_request_headers",
+    "sanitize_response_headers",
+    "select_assertion",
     "DEFAULT_ACCEPTED_ALGORITHMS",
     "DEFAULT_REQUIRED_CLAIMS",
     "MissingClaimError",
