@@ -87,7 +87,7 @@ def _current_trace() -> tuple[str, str, bool] | None:
     problem than a formatter that throws inside an exception handler.
     """
     try:
-        from opentelemetry import trace  # noqa: PLC0415
+        import opentelemetry.trace as trace  # noqa: PLC0415
     except ImportError:
         return None
     try:

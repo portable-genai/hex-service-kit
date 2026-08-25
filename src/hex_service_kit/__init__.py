@@ -26,14 +26,23 @@ One source of truth for the cross-cutting server layer a hexagonal service re-im
   carrying Cloud Logging's own field names and the active trace id on a deployed profile, plain
   text on a laptop.
 
+* **Packaging** (:mod:`hex_service_kit.plugin`) renders what a service already declares
+  (its agent card, its governed tool catalog, its vendored Agent Skills) into an Agent Plugins
+  1.0.0 directory, so one use case installs across compliant clients. Packaging only: the
+  standard carries no data-portability mechanism, so the evidence trail keeps ``EXPORT_FORMAT``
+  and its adapters, and a plugin only ever REACHES the ledger through a served tool.
+
 The core is pure standard library (zero runtime dependencies), and that includes the logging
 and observability additions: the tracer PORT is typing, and the log formatter reads the current
 trace through an optional import that no-ops when OpenTelemetry is absent.
 
-Two modules are deliberately NOT re-exported here, so the kernel imports with neither a web
-framework nor a telemetry SDK installed: :mod:`hex_service_kit.web` (the FastAPI request-time
-glue, ``fastapi`` extra) and :mod:`hex_service_kit.tracing` (the OpenTelemetry tracer
-implementation, ``otel`` extra). Import either explicitly where you need it.
+Three modules are deliberately NOT re-exported here, so the kernel imports with no web
+framework, no telemetry SDK and no MCP SDK installed: :mod:`hex_service_kit.web` (the FastAPI
+request-time glue, ``fastapi`` extra), :mod:`hex_service_kit.tracing` (the OpenTelemetry tracer
+implementation, ``otel`` extra) and :mod:`hex_service_kit.mcpserve` (serving a tool catalog over
+MCP, ``interop`` extra). Import any of them explicitly where you need it. ``plugin`` IS
+re-exported, because rendering a plugin directory is pure standard library and a repo has to be
+able to do it inside the offline gate.
 """
 
 from __future__ import annotations
@@ -49,6 +58,7 @@ from . import (
     logging,
     netdefaults,
     observability,
+    plugin,
     s2s,
     serialization,
 )
@@ -115,10 +125,25 @@ from .netdefaults import (
     resolve_bind_host,
 )
 from .observability import ObservabilityTracerPort, TokenUsage
+from .plugin import (
+    MCP_SCHEMA_URL,
+    PLUGIN_SCHEMA_URL,
+    SPEC_VERSION,
+    Author,
+    PluginSpec,
+    PluginSpecError,
+    RenderReport,
+    StdioServer,
+    StreamableHttpServer,
+    discover_skills,
+    keywords_from_skill_ids,
+    load_schema,
+    render,
+)
 from .s2s import client_headers, validate_base_url
 from .serialization import dataclass_from_jsonable, to_jsonable
 
-__version__ = "0.0.4"
+__version__ = "0.0.5"
 
 __all__ = [
     "federation",
@@ -192,6 +217,20 @@ __all__ = [
     "identity",
     "is_loopback_host",
     "netdefaults",
+    "plugin",
+    "Author",
+    "PluginSpec",
+    "PluginSpecError",
+    "RenderReport",
+    "StdioServer",
+    "StreamableHttpServer",
+    "SPEC_VERSION",
+    "PLUGIN_SCHEMA_URL",
+    "MCP_SCHEMA_URL",
+    "discover_skills",
+    "keywords_from_skill_ids",
+    "load_schema",
+    "render",
     "read_env_setting",
     "resolve_bind_host",
     "s2s",

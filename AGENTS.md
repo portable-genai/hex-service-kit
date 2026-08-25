@@ -18,7 +18,7 @@ any such service.
 A venv exists at `.venv`. Setup from scratch:
 
 ```sh
-pip install -e ".[dev]"        # core + fastapi extra + httpx + ruff (pinned) + mypy + pytest
+pip install -e ".[dev]"        # core + fastapi + interop extras + httpx + ruff (pinned) + mypy + pytest
 ```
 
 The full CI gate, in order (all four must pass):
@@ -40,10 +40,16 @@ pytest tests/test_web.py -k s2s -q
 ## Hard constraints
 
 - **The core is pure stdlib, zero runtime dependencies.** `identity`, `s2s`, `netdefaults`,
-  `enums`, `serialization`, `audit` never import a web framework or a cloud SDK. `dependencies = []`
-  in pyproject is deliberate. Only `hex_service_kit.web` needs FastAPI, and it is behind the
-  `fastapi` extra and is NOT re-exported from `__init__` (so `import hex_service_kit` works with
-  no web framework installed).
+  `enums`, `serialization`, `audit`, `plugin` never import a web framework or a cloud SDK.
+  `dependencies = []` in pyproject is deliberate. Only `hex_service_kit.web` needs FastAPI
+  (`fastapi` extra) and only `hex_service_kit.mcpserve` needs the MCP SDK (`interop` extra);
+  neither is re-exported from `__init__`, so `import hex_service_kit` works with no web
+  framework and no MCP SDK installed. `plugin` IS re-exported, because a repo has to be able to
+  render its plugin directory inside the offline gate, which installs neither extra.
+- **Packaging is stdlib, serving is an extra.** Describing a tool catalog as an Agent Plugins
+  directory needs nothing installed; answering calls over MCP needs `interop`. Keep that line
+  where it is: it is what lets all 53 repos render a plugin while only the ones with a catalog
+  serve one.
 - **Python >=3.12**, mypy `strict = true`, ruff line-length 100 with `E,F,I,UP,B,SIM`.
 - **Fail closed.** Do not add a code path where the no-auth local profile binds off loopback by
   default, CORS falls back to `*`, or an unset secret is treated as "authenticated". A CORS
@@ -62,8 +68,8 @@ pytest tests/test_web.py -k s2s -q
 
 ## Architecture
 
-Eight core modules in `src/hex_service_kit/`. Core (stdlib) is re-exported flat from `__init__.py`;
-`web` is imported explicitly.
+Ten core modules in `src/hex_service_kit/`. Core (stdlib) is re-exported flat from `__init__.py`;
+`web`, `tracing` and `mcpserve` are imported explicitly.
 
 - **identity.py** - value objects (`Principal`, `RequestContext`) + the `IdentityPort` protocol
   + `LocalPersonaIdentityAdapter`. Personas are a constructor argument (default `DEFAULT_PERSONAS`),
@@ -100,6 +106,28 @@ Eight core modules in `src/hex_service_kit/`. Core (stdlib) is re-exported flat 
   weakened kit before it was allowed to be green. Adding a third adapter means implementing
   the five primitives and adding its name to `ADAPTERS` in that test, never restating the
   chain or anchor rules.
+- **plugin.py** - Agent Plugins 1.0.0 packaging. Renders what a repo ALREADY declares (agent
+  card, governed tool catalog, vendored `.agents/skills`) into the directory layout a compliant
+  client installs: `plugin.json`, an optional `skills/`, an optional `mcp.json`, plus Claude
+  Code's own manifest in the same directory because it is not an Agent Plugins client. Nothing
+  is hand-authored, so a manifest cannot advertise a capability the service does not have.
+  The specification schemas are VENDORED under `schemas/` and hashed in `PROVENANCE.md`, so the
+  offline gate validates against the real published schema and an upgrade is a deliberate edit.
+  Two normative rules a JSON Schema cannot express are enforced while writing rather than after:
+  reserved-variable placement (`PLUGIN_ROOT` / `PLUGIN_DATA` may be read, never defined, and
+  expansion never applies to `command`) and path containment.
+  Agent Plugins packages TOOLING and carries no data-portability mechanism, so nothing here
+  touches the evidence trail. That stays the ledger's own concern.
+- **mcpserve.py** - the other half of the tool catalogs, which sixteen repos declared and none
+  ever served. `build_server` pairs the catalog with its handlers and refuses to start on a
+  mismatch in EITHER direction (a declared tool with no handler is a capability the service
+  cannot perform; a handler with no catalog entry is an ungoverned entry point). Arguments are
+  judged by the tool's own declared schema. A refusal returns `is_error` rather than raising, so
+  one bad call does not tear down the session for every other tool. Given an `AuditStorePort` it
+  adds exactly two READ-ONLY evidence tools, `audit_verify` and `audit_export`; there is no
+  write tool and there should not be, because appending to the trail is something a service does
+  as it works, not something a caller asks for. `interop` extra, lazy imports, not re-exported.
+
 - **web.py** - the FastAPI glue. The provider callables (which IdentityPort, which profile) are
   arguments so this package never depends on a consumer's DI container. Google OIDC libs are
   imported lazily inside `make_require_service_caller` so the offline profile imports with no GCP

@@ -145,7 +145,7 @@ class _Tracer:
         if self._otel_tracer is not None:
             return self._otel_tracer
 
-        from opentelemetry import trace  # noqa: PLC0415
+        import opentelemetry.trace as trace  # noqa: PLC0415
         from opentelemetry.sdk.resources import Resource  # noqa: PLC0415
         from opentelemetry.sdk.trace import TracerProvider  # noqa: PLC0415
         from opentelemetry.sdk.trace.export import BatchSpanProcessor  # noqa: PLC0415
@@ -179,7 +179,7 @@ class _Tracer:
 
     def record_token_usage(self, usage: TokenUsage, model: str) -> None:
         try:
-            from opentelemetry import trace  # noqa: PLC0415
+            import opentelemetry.trace as trace  # noqa: PLC0415
 
             current = trace.get_current_span()
             current.set_attribute("gen_ai.request.model", model)
