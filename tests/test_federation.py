@@ -401,3 +401,115 @@ def test_the_subject_principal_can_be_left_out() -> None:
 
     assert with_subject.principals == ("user:analyst@corp.example", "group:analyst")
     assert without.principals == ("group:analyst",)
+
+
+# --------------------------------------------------------------------------------------- #
+# The four things an adopting repository could not express here, and was keeping its own copy
+# of. Each defaults to what the fleet already did, so the "unchanged" half of every pair below
+# is as load-bearing as the "changed" half: a knob that altered behaviour for adopters who
+# never set it would be a silent migration of fifty-four repositories.
+# --------------------------------------------------------------------------------------- #
+def test_machine_tenants_names_the_account_where_one_machine_tenant_cannot() -> None:
+    """A deployment whose machine callers are not all one tenant had no way to say so."""
+
+    policy = FederationPolicy(
+        machine_tenant="platform",
+        machine_tenants={"ingest@p.iam.gserviceaccount.com": "reference-bank"},
+    )
+
+    named = principal_from_iap_claims(
+        _claims(email="ingest@p.iam.gserviceaccount.com", hd=""), policy
+    )
+    other = principal_from_iap_claims(
+        _claims(email="other@p.iam.gserviceaccount.com", hd=""), policy
+    )
+
+    assert named.tenant == "reference-bank"
+    assert other.tenant == "platform", "an unmapped machine still takes the single default"
+
+
+def test_the_machine_map_is_keyed_on_the_account_not_its_domain() -> None:
+    """Every service account in a project shares a domain, so keying on it would merge them."""
+
+    policy = FederationPolicy(machine_tenants={"p.iam.gserviceaccount.com": "wrong"})
+
+    principal = principal_from_iap_claims(
+        _claims(email="ingest@p.iam.gserviceaccount.com", hd=""), policy
+    )
+
+    assert principal.tenant == ""
+
+
+def test_a_human_outside_the_allowlist_is_refused_like_a_machine() -> None:
+    """The asymmetry that existed before was an omission, not a decision."""
+
+    policy = FederationPolicy(allowed_human_subjects=("analyst@corp.example",))
+
+    assert principal_from_iap_claims(_claims(), policy).subject == "analyst@corp.example"
+    with pytest.raises(IdentityError, match="human caller"):
+        principal_from_iap_claims(_claims(email="stranger@corp.example"), policy)
+
+
+def test_an_empty_human_allowlist_admits_anyone_the_edge_admits() -> None:
+    """The default, and the reason the check above cannot be turned on for everyone."""
+
+    assert (
+        principal_from_iap_claims(_claims(), FederationPolicy()).subject == "analyst@corp.example"
+    )
+
+
+def test_an_unmapped_tenant_refuses_when_the_deployment_asked_to_be_told() -> None:
+    """An empty tenant reads at the point of refusal as a permissions bug, not a missing map."""
+
+    policy = FederationPolicy(refuse_unmapped_tenant=True)
+
+    with pytest.raises(IdentityError, match="no reviewed tenant"):
+        principal_from_iap_claims(_claims(), policy)
+
+
+def test_the_refusal_is_off_by_default_because_an_empty_tenant_means_three_things() -> None:
+    """Most adopters fail closed on it, two refuse, and one partitions by mail domain."""
+
+    assert principal_from_iap_claims(_claims(), FederationPolicy()).tenant == ""
+
+
+def test_a_mapped_tenant_is_unaffected_by_the_refusal_knob() -> None:
+    """Without this, the guard above would pass against a policy that refused everything."""
+
+    policy = FederationPolicy(
+        domain_tenants={"corp.example": "reference-bank"}, refuse_unmapped_tenant=True
+    )
+
+    assert principal_from_iap_claims(_claims(), policy).tenant == "reference-bank"
+
+
+def test_the_audit_actor_can_be_the_immutable_subject_rather_than_the_address() -> None:
+    """An address released and reissued makes historic audit records read as a new joiner."""
+
+    opaque = FederationPolicy(subject_from="subject")
+    canonical = FederationPolicy(subject_from="issuer_subject")
+
+    assert principal_from_iap_claims(_claims(), opaque).subject == "accounts.google.com:1234"
+    assert principal_from_iap_claims(_claims(), canonical).subject == (
+        f"{IAP_ISSUER}#accounts.google.com:1234"
+    )
+    assert principal_from_iap_claims(_claims(), FederationPolicy()).subject == (
+        "analyst@corp.example"
+    ), "the default is unchanged, which is what makes this safe to ship to every adopter"
+
+
+def test_the_immutable_subject_never_falls_back_to_the_address() -> None:
+    """Falling back would reinstate the reassignable actor the choice was made to avoid."""
+
+    principal = principal_from_iap_claims(
+        _claims(email="analyst@corp.example"), FederationPolicy(subject_from="subject")
+    )
+
+    assert "@" not in principal.subject
+
+
+def test_an_unknown_subject_source_is_refused_at_construction() -> None:
+    """A mis-spelling would otherwise fall through to the reassignable default, silently."""
+
+    with pytest.raises(IdentityError, match="subject_from"):
+        FederationPolicy(subject_from="e-mail")

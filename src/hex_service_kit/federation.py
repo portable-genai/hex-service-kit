@@ -201,6 +201,11 @@ def select_assertion(headers: Mapping[str, str]) -> AssertionSource:
 # well-formed principal that is simply refused everything it asks for, which reads as a
 # permissions bug in the application rather than as missing configuration.
 # --------------------------------------------------------------------------------------- #
+#: The three answers to "what is this caller's stable name". Named rather than inlined so the
+#: refusal message can list them and so a fourth cannot be added without editing this line.
+_SUBJECT_SOURCES = frozenset({"email", "subject", "issuer_subject"})
+
+
 @dataclass(frozen=True, slots=True)
 class FederationPolicy:
     """The reviewed maps that turn a verified assertion into an authorized principal.
@@ -220,10 +225,49 @@ class FederationPolicy:
     domain_tenants: Mapping[str, str] = field(default_factory=dict)
     domain_groups: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     machine_tenant: str = ""
+    #: Per-service-account tenants, for a deployment whose machine callers do NOT all belong to
+    #: one tenant. ``machine_tenant`` says "every machine here is the same tenant", which is the
+    #: common case and stays the default; this map says which ones are not. The map wins where it
+    #: has an entry, so adding it never changes a deployment that does not use it.
+    #:
+    #: Both exist because they answer different questions, and collapsing them would force a
+    #: deployment with two machine populations to keep its own copy of this function, which is
+    #: the drift this module exists to end.
+    machine_tenants: Mapping[str, str] = field(default_factory=dict)
     #: Service-account subjects allowed to reach this service at all. Empty means "any
     #: authenticated machine caller", which is the correct posture only where an upstream
     #: invoker binding is already the boundary.
     allowed_machine_subjects: tuple[str, ...] = ()
+    #: The same allowlist for HUMAN subjects, and it is not symmetric with the machine one by
+    #: accident. Empty means "any human the edge admits", which is the right posture wherever IAP
+    #: already restricts who reaches the service. A deployment that needs a named set of people
+    #: (a pilot, a break-glass console, a regulator's read-only account) had no way to say so and
+    #: was keeping its own check, or not checking.
+    allowed_human_subjects: tuple[str, ...] = ()
+    #: Refuse a caller whose tenant no rule resolves, instead of handing back an empty string.
+    #:
+    #: OFF by default because that is what every current adopter does, and three of them mean
+    #: three different things by an empty tenant: most fail closed on it, two refuse outright,
+    #: and one partitions by mail domain because there a domain partition is strictly safer than
+    #: none. This knob expresses the second of those, and it must stay opt-in: turning it on for
+    #: everyone would convert a deployment's fail-closed empty tenant into a hard refusal, which
+    #: is a different product decision than the one this kit is entitled to make.
+    #:
+    #: An empty tenant is not an error in itself. It is an error where the deployment has said
+    #: that every caller belongs to a tenant, and this is how it says that.
+    refuse_unmapped_tenant: bool = False
+    #: Which value becomes the principal's subject, and therefore the AUDIT ACTOR.
+    #:
+    #: ``"email"`` is the default and what every current adopter records. It is also the only
+    #: one of the three that is REASSIGNABLE: an address released and given to a new joiner
+    #: makes historic audit records read as that person's. That is a defensible trade where the
+    #: trail is read by humans who know the directory, and not defensible where it is evidence.
+    #:
+    #: ``"subject"`` is the provider's opaque ``sub``: immutable, and unreadable without the
+    #: directory. ``"issuer_subject"`` is the canonical ``(iss, sub)`` pair written
+    #: ``<iss>#<sub>``, which is the only form that stays unique when a deployment federates a
+    #: second issuer, because ``sub`` is unique per issuer and not globally.
+    subject_from: str = "email"
     #: Take the hosted domain itself as the tenant when no mapping names it. OFF by default,
     #: and opt-in rather than a fallback, because the two readings differ in who decides.
     #:
@@ -238,8 +282,26 @@ class FederationPolicy:
     #: would then widen access instead of failing closed.
     tenant_from_hosted_domain: bool = False
 
+    def __post_init__(self) -> None:
+        """Refuse an unknown ``subject_from`` here rather than at the first request.
+
+        A mis-spelled value would otherwise fall through to the email branch and silently give
+        the reassignable actor the deployment was trying to move away from, which is the failure
+        this knob exists to prevent.
+        """
+        if self.subject_from not in _SUBJECT_SOURCES:
+            raise IdentityError(
+                f"subject_from={self.subject_from!r} is not one of "
+                f"{', '.join(sorted(_SUBJECT_SOURCES))}"
+            )
+
     def tenant_for(
-        self, hosted_domain: str, *, email_domain: str = "", machine: bool = False
+        self,
+        hosted_domain: str,
+        *,
+        email_domain: str = "",
+        machine: bool = False,
+        machine_subject: str = "",
     ) -> str:
         """The tenant for a verified caller, from the two domains kept deliberately apart.
 
@@ -252,9 +314,17 @@ class FederationPolicy:
         external federated identity -- would go from no tenant to a tenant named after its
         mail domain, silently, at a tenancy boundary. Anyone able to receive mail at a domain
         they control would have become a tenant of it.
+
+        ``machine_subject`` is the service-account address, consulted only for a machine caller
+        and only against ``machine_tenants``. It is a separate argument rather than reusing
+        ``email_domain`` because a service account's DOMAIN is shared by every account in the
+        project: keying tenancy on it would put unrelated machine callers in one tenant.
         """
         if machine:
-            return self.machine_tenant
+            # The per-account map first, then the single default. A machine caller carries no
+            # hosted domain at all, so the domain map below can never answer for one; this is
+            # the whole of a machine's tenancy.
+            return self.machine_tenants.get(machine_subject.lower(), "") or self.machine_tenant
         asserted = hosted_domain.lower()
         derived = email_domain.lower()
         # The map still wins where it has an answer, so enabling passthrough never overrides
@@ -274,6 +344,23 @@ class FederationPolicy:
             if domain and (groups := self.domain_groups.get(domain, ())):
                 return tuple(groups)
         return ()
+
+
+def _subject_id(source: str, *, email: str, subject: str, issuer: str) -> str:
+    """The principal's stable name, by the deployment's reviewed choice of what stable means.
+
+    ``email`` keeps the existing behaviour and falls back to ``sub`` when the assertion carries
+    no address, because an actor is required and a blank one audits nothing. The other two never
+    fall back: choosing them is a statement that the reassignable value must not be the actor,
+    and quietly substituting it under a claim set that happens to lack a ``sub`` would defeat
+    exactly the choice being made. ``principal_from_iap_claims`` has already refused a subjectless
+    assertion by the time this is reached, so there is nothing to fall back to anyway.
+    """
+    if source == "subject":
+        return subject
+    if source == "issuer_subject":
+        return f"{issuer}#{subject}"
+    return email or subject
 
 
 def _hosted_domain(claims: Mapping[str, object]) -> str:
@@ -323,6 +410,14 @@ def principal_from_iap_claims(
     principals. Adapters differ on this deliberately -- one family grants it, another leaves
     the tuple to the group map alone -- and it is an authorization decision, so it is a
     parameter rather than a default this function picks for a caller.
+
+    Four things about the resulting principal are the POLICY's to decide, and all four exist
+    because an adopting repository could not express them here and was keeping its own copy:
+    which service account belongs to which tenant (``machine_tenants``), which humans may reach
+    the service at all (``allowed_human_subjects``), whether an unmapped tenant is an empty
+    string or a refusal (``refuse_unmapped_tenant``), and which claim becomes the audit actor
+    (``subject_from``). Every one of them defaults to what the fleet already did, so adding them
+    changes no adopter's behaviour until that adopter says so.
     """
     issuer = str(claims.get("iss") or "")
     if issuer != IAP_ISSUER:
@@ -338,12 +433,28 @@ def principal_from_iap_claims(
     machine = email.endswith(".gserviceaccount.com")
     if machine and policy.allowed_machine_subjects and email not in policy.allowed_machine_subjects:
         raise IdentityError(f"machine caller {email!r} is not in the reviewed allowlist")
+    if not machine and policy.allowed_human_subjects and email not in policy.allowed_human_subjects:
+        # Deliberately the same shape as the machine check above. A deployment that names its
+        # people is making the same statement as one that names its service accounts, and the
+        # asymmetry that existed before was an omission rather than a decision.
+        raise IdentityError(f"human caller {email!r} is not in the reviewed allowlist")
 
     hosted = _hosted_domain(claims)
     derived = _email_domain(email)
-    tenant = policy.tenant_for(hosted, email_domain=derived, machine=machine)
+    tenant = policy.tenant_for(hosted, email_domain=derived, machine=machine, machine_subject=email)
+    if not tenant and policy.refuse_unmapped_tenant:
+        # Refusing here rather than returning an empty tenant is the point: an empty tenant
+        # produces a well-formed principal that is simply refused everything it asks for, which
+        # reads at the point of refusal as a permissions bug in the application rather than as
+        # the missing mapping it is. The deployment asked to be told.
+        raise IdentityError(
+            f"no reviewed tenant for {email or subject!r}"
+            f"{' (machine caller)' if machine else f' (hosted domain {hosted!r})'}; "
+            "refuse_unmapped_tenant is set, so an unmapped caller is refused rather than "
+            "given an empty tenant"
+        )
     groups = policy.groups_for(hosted, derived)
-    subject_id = email or subject
+    subject_id = _subject_id(policy.subject_from, email=email, subject=subject, issuer=issuer)
     principals = ((f"user:{subject_id}",) if include_subject_principal else ()) + groups
     return Principal(
         subject=subject_id,
