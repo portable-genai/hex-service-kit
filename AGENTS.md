@@ -39,13 +39,20 @@ pytest tests/test_web.py -k s2s -q
 
 ## Hard constraints
 
-- **The core is pure stdlib, zero runtime dependencies.** `identity`, `s2s`, `netdefaults`,
-  `enums`, `serialization`, `audit`, `plugin` never import a web framework or a cloud SDK.
-  `dependencies = []` in pyproject is deliberate. Only `hex_service_kit.web` needs FastAPI
-  (`fastapi` extra) and only `hex_service_kit.mcpserve` needs the MCP SDK (`interop` extra);
-  neither is re-exported from `__init__`, so `import hex_service_kit` works with no web
-  framework and no MCP SDK installed. `plugin` IS re-exported, because a repo has to be able to
-  render its plugin directory inside the offline gate, which installs neither extra.
+- **The core is pure stdlib, zero runtime dependencies.** Every module except
+  `hex_service_kit.web` imports cleanly with nothing installed: `identity`, `s2s`, `netdefaults`,
+  `enums`, `serialization`, `audit`, `assertion`, `federation`, `capabilities`, `evals`,
+  `observability`, `logging`, `plugin`, `tracing` and `mcpserve`. `dependencies = []` in
+  pyproject is deliberate. The list is stated in full rather than as an example, because naming
+  a subset invites the reader to assume the rest are not stdlib and to add a dependency to one
+  of them.
+  Two of those need an extra to FUNCTION rather than to import: `mcpserve` needs the MCP SDK
+  (`interop`) and `tracing` needs the OpenTelemetry SDK (`otel`), and both import theirs lazily
+  inside the function that uses it. That distinction is the whole reason the offline gate can
+  run them. `web` is the one module that needs FastAPI at import time (`fastapi` extra), and it
+  is not re-exported from `__init__`, so `import hex_service_kit` works with no web framework
+  and no MCP SDK installed. `plugin` IS re-exported, because a repo has to be able to render its
+  plugin directory inside the offline gate, which installs neither extra.
 - **Packaging is stdlib, serving is an extra.** Describing a tool catalog as an Agent Plugins
   directory needs nothing installed; answering calls over MCP needs `interop`. Keep that line
   where it is: it is what lets all 53 repos render a plugin while only the ones with a catalog

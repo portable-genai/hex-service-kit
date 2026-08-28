@@ -125,6 +125,57 @@ else:
     tenants = [t.strip() for t in setting.value.split(",") if t.strip()]
 ```
 
+## Turning a verified assertion into a principal
+
+`federation` owns the half that comes AFTER the signature and audience have been checked: which
+header carried the assertion, what a broker must strip, and how a claim set becomes a
+`Principal`. It exists because the same rules had been reimplemented in every repository and had
+already drifted between them.
+
+`FederationPolicy` is where a deployment states the things the kit must not guess. Every field
+defaults to what the fleet already did, so adopting a newer kit changes no behaviour until the
+deployment says so:
+
+| Field | The question it answers |
+|---|---|
+| `domain_tenants` / `domain_groups` | which sign-in domain is which tenant, and which groups its users hold |
+| `machine_tenant` | the tenant every machine caller shares |
+| `machine_tenants` | which SERVICE ACCOUNT is which tenant, where one shared tenant is wrong. Keyed on the account, never its domain: every account in a project shares a domain, so keying on that would merge unrelated callers into one tenant |
+| `allowed_machine_subjects` / `allowed_human_subjects` | who may reach this service at all. Empty means "anyone the edge admits", which is correct only where an upstream binding is already the boundary |
+| `tenant_from_hosted_domain` | take the `hd` claim itself as the tenant when no map names it. Opt-in, never a silent fallback for a map that was meant to be configured |
+| `refuse_unmapped_tenant` | whether an unmapped caller is refused or given an empty tenant |
+| `subject_from` | which claim becomes the audit actor: `email`, `subject`, or `issuer_subject` |
+
+Two of these are worth reading rather than setting from the table.
+
+**`refuse_unmapped_tenant` is diagnostic as much as it is safety.** An empty tenant produces a
+well-formed principal that is then refused everything it asks for, and at the point of refusal
+that reads as a permissions bug in the application rather than as the missing mapping it is. It
+is off by default and must stay opt-in, because an empty tenant does not mean one thing: some
+services fail closed on it, some refuse outright, and at least one partitions by mail domain
+because there a domain partition is strictly safer than none.
+
+**`subject_from` is a non-repudiation choice.** The default, `email`, is the only one of the
+three that is REASSIGNABLE: an address released and given to a new joiner makes historic audit
+records read as that person's. `subject` is the provider's opaque `sub`. `issuer_subject` is the
+canonical `(iss, sub)` pair, and it is the only form that stays unique once a deployment
+federates a second issuer, because `sub` is unique per issuer and not globally. The two immutable
+forms never fall back to the address, and an unrecognised value is refused when the policy is
+constructed rather than falling through to the reassignable default at the first request.
+
+```python
+from hex_service_kit.federation import FederationPolicy, principal_from_iap_claims
+
+policy = FederationPolicy(
+    domain_tenants={"bank.example": "reference-bank"},
+    domain_groups={"bank.example": ("group:reviewer",)},
+    machine_tenants={"ingest@p.iam.gserviceaccount.com": "reference-bank"},
+    refuse_unmapped_tenant=True,   # tell me, rather than handing back ""
+    subject_from="issuer_subject", # the actor is immutable and issuer-qualified
+)
+principal = principal_from_iap_claims(verified_claims, policy)
+```
+
 ## Modules
 
 | Module | What it owns | Deps |
@@ -135,6 +186,15 @@ else:
 | `enums` | `StrEnum` base, `LenientStrEnum` (case-insensitive, fail-closed) | stdlib |
 | `serialization` | `to_jsonable`, `dataclass_from_jsonable` (type-hint-driven round-trip) | stdlib |
 | `audit` | `AuditStorePort` + `AnchoredChainStore` (the chain, anchor and export policy) with two storage adapters: `HashChainedAuditLog` (append-only SQLite WORM) and `JsonlFileAuditLog` (flat append-only JSON Lines, for offline archives) | stdlib |
+| `assertion` | `assertion_algorithm`, `require_pinned_algorithm`, `require_claims`: pins what a signed assertion may be BEFORE a verifier is asked to check it | stdlib |
+| `federation` | `select_assertion` (which header carries it, and what a broker must strip), `FederationPolicy`, `principal_from_iap_claims`, `sanitize_request_headers` / `sanitize_response_headers`, `build_injection_plan` | stdlib |
+| `capabilities` | `Capability`, `CapabilityManifest`, `CapabilityMode`, `AssuranceLevel`: the vendor-neutral runtime capability and assurance manifest | stdlib |
+| `evals` | `EvalRunEnvelope`, `EvalMetricEvidence`, `EvalRunStatus`: the portable evaluation-run evidence envelope | stdlib |
+| `observability` | `ObservabilityTracerPort` and `TokenUsage`, defined once so the port and the value type cannot drift apart | stdlib |
+| `logging` | `CloudLoggingFormatter`, `configure_logging`: JSON that Cloud Logging parses natively, plain text on a laptop | stdlib |
+| `plugin` | `PluginSpec`, `render`, `discover_skills`, `load_schema`: renders an Agent Plugins 1.0.0 directory from what a repo already declares. **Packaging is stdlib**, so a repo renders its plugin inside the offline gate | stdlib |
+| `tracing` | `build_tracer`: the OpenTelemetry tracer, built once here rather than copied into every repository | `otel` extra |
+| `mcpserve` | `bind` (refuses a catalog/handler mismatch in BOTH directions), `build_server`, `run_stdio`, `streamable_http_app`, `audit_tools`, `is_modern_era` | `interop` extra |
 | `web` | `make_get_principal`, `make_require_service_caller`, `add_security_headers`, `add_loopback_exposure_guard` | `fastapi` extra |
 
 ## Install
