@@ -6,15 +6,15 @@ function that needs it, so this module is importable with no SDK present and the
 SDK-free gate keeps passing. That is the same discipline the ``gcp`` adapters follow in every
 catalog repo, and it is load-bearing rather than stylistic.
 
-**Where spans go, and why one adapter decides it.** A repository may export straight to Cloud
-Trace, or it may export OTLP to the Hrz5 collector, which redacts and aggregates before forwarding.
-Both are supported deployments: Hrz5's own README calls direct-to-Cloud-Trace the supported default
-for a vertical with no collector deployed, and the collector the aggregation path. So the choice is
-a deployment fact, not a code fact, and it is read from ``OTEL_EXPORTER_OTLP_ENDPOINT`` by ONE
-adapter rather than modelled as two adapters behind two profiles. Doing it with profiles would have
-meant adding a fourth member to every repo's ``KNOWN_PROFILES``, and the binding table refuses
-unless every port binds every profile, so it would have cost several hundred alias bindings across
-the fleet to express one optional endpoint.
+**Where spans go, and why one adapter decides it.** A repository may export straight to Cloud Trace,
+or it may export OTLP to the agent-observability collector, which redacts and aggregates before
+forwarding. Both are supported deployments: agent-observability's own README calls
+direct-to-Cloud-Trace the supported default for a vertical with no collector deployed, and the
+collector the aggregation path. So the choice is a deployment fact, not a code fact, and it is read
+from ``OTEL_EXPORTER_OTLP_ENDPOINT`` by ONE adapter rather than modelled as two adapters behind two
+profiles. Doing it with profiles would have meant adding a fourth member to every repo's
+``KNOWN_PROFILES``, and the binding table refuses unless every port binds every profile, so it would
+have cost several hundred alias bindings across the fleet to express one optional endpoint.
 
 **The endpoint is read in three states.** The implementation this was promoted from used
 ``os.environ.get(name, "")``, which makes unset and set-and-empty the same answer. It survived
@@ -41,7 +41,7 @@ from .observability import ObservabilityTracerPort, TokenUsage
 
 _LOG = logging.getLogger(__name__)
 
-#: The canonical name, published by Hrz5's ``otlp_endpoint`` Terraform output.
+#: The canonical name, published by agent-observability's ``otlp_endpoint`` Terraform output.
 ENDPOINT_ENV: Final = "OTEL_EXPORTER_OTLP_ENDPOINT"
 #: Audience for the ID token when the collector is a private Cloud Run service.
 AUDIENCE_ENV: Final = "OTEL_EXPORTER_OTLP_AUDIENCE"
@@ -77,7 +77,8 @@ def _resolve_endpoint() -> str:
 def _wants_cloud_run_auth(endpoint: str) -> bool:
     """Whether to mint an ID token per export.
 
-    The Hrz5 collector runs as an internal-only Cloud Run service with a ``roles/run.invoker``
+    The agent-observability collector runs as an internal-only Cloud Run service with a
+    ``roles/run.invoker``
     binding, so an unauthenticated export is rejected and the spans vanish. Inferred from the
     hostname, because ``.run.app`` is unambiguous, and overridable for a collector behind a custom
     domain that is still Cloud Run.

@@ -85,7 +85,9 @@ def test_a_span_is_usable_as_a_plain_context_manager_when_tracing_is_unavailable
 def test_cloud_run_auth_is_inferred_from_the_hostname_and_overridable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The Hrz5 collector is internal-only Cloud Run: an unauthenticated export just vanishes."""
+    """The agent-observability collector is internal-only Cloud Run: an unauthenticated export just
+    vanishes.
+    """
     from hex_service_kit.tracing import CLOUD_RUN_AUTH_ENV, _wants_cloud_run_auth
 
     monkeypatch.delenv(CLOUD_RUN_AUTH_ENV, raising=False)

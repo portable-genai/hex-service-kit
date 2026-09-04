@@ -60,7 +60,8 @@ class ObservabilityTracerPort(Protocol):
         find the span again and to group spans, and nothing that would turn the trace backend into
         an unredacted copy of the data the service processes (principle P-04).
 
-        The Hrz5 collector does strip a list of known content attributes on the way through, but
+        The agent-observability collector does strip a list of known content attributes on the way
+        through, but
         that is defence in depth for spans this catalog does not own. It is not licence to emit
         content and rely on the strip, because the list names the keys it knows about and a new
         key is not on it.
