@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hex-service-kit"
-version = "0.0.6"
+version = "0.0.7"
 description = "The shared service spine for hexagonal agent repos: a server-verified identity layer (Principal / IdentityPort / seeded dev personas that discard the client-asserted actor), service-to-service transport hardening (https-only base URLs, bearer + HMAC-signed actor propagation, fail-closed caller authentication), fail-closed network defaults (loopback bind with an explicit insecure-demo guard, a CORS allowlist that can never fall back to '*'), and kernel primitives (a StrEnum base and an append-only hash-chained WORM audit log). Pure standard library core, with an optional FastAPI integration layer."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -56,6 +56,12 @@ otel = [
 # 2026-07-28 era and cannot speak it at all, so an older resolution would quietly put this
 # server back on the initialize handshake that revision removed.
 interop = ["mcp>=2.1", "jsonschema>=4.26"]
+# The laptop half of the demo-book pattern (``hex_service_kit.demobook``): a DuckDB store
+# holding the same tables a managed dataset holds, so a demo's records are one book on both
+# surfaces. The book reader, the overwrite guard and the tenant rule stay in the stdlib core,
+# so a consumer that only loads a managed dataset installs no database; only serving the book
+# on a laptop needs this. The import is lazy, inside the store's connect.
+demobook = ["duckdb>=1.4"]
 # The test/lint toolchain. Ruff is pinned EXACTLY so formatting never drifts across
 # machines. The dev extra pulls the fastapi extra so mypy and pytest cover ``web.py``, and the
 # interop extra so the offline gate exercises a REAL client/server session rather than skipping
@@ -63,6 +69,10 @@ interop = ["mcp>=2.1", "jsonschema>=4.26"]
 dev = [
   "hex-service-kit[fastapi]",
   "hex-service-kit[interop]",
+  # Pulled so the DuckDB store is actually EXERCISED by the gate. With it optional here the
+  # store's tests would skip, and a permanently skipped test reports the same green as a
+  # passing one.
+  "hex-service-kit[demobook]",
   "httpx>=0.27",
   "ruff==0.16.5",
   "mypy>=1.10",
