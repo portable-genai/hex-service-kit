@@ -27,6 +27,8 @@ click==8.5.0
     # via uvicorn
 cryptography==50.0.1
     # via pyjwt
+duckdb==1.5.5
+    # via hex-service-kit (pyproject.toml)
 fastapi==0.141.1
     # via hex-service-kit (pyproject.toml)
 h11==0.16.0
