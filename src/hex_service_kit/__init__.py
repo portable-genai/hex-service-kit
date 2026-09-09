@@ -52,7 +52,6 @@ from . import (
     audit,
     capabilities,
     enums,
-    evals,
     federation,
     identity,
     logging,
@@ -84,7 +83,6 @@ from .audit import (
 )
 from .capabilities import AssuranceLevel, Capability, CapabilityManifest, CapabilityMode
 from .enums import LenientStrEnum, StrEnum
-from .evals import EvalMetricEvidence, EvalRunEnvelope, EvalRunStatus
 from .federation import (
     CLIENT_SPOOFABLE_IDENTITY,
     HOP_BY_HOP_REQUEST,
@@ -143,7 +141,7 @@ from .plugin import (
 from .s2s import client_headers, validate_base_url
 from .serialization import dataclass_from_jsonable, to_jsonable
 
-__version__ = "0.0.7"
+__version__ = "0.0.8"
 
 __all__ = [
     "federation",
@@ -198,9 +196,6 @@ __all__ = [
     "InsecureBindError",
     "InsecureCorsError",
     "JsonlFileAuditLog",
-    "EvalMetricEvidence",
-    "EvalRunEnvelope",
-    "EvalRunStatus",
     "LenientStrEnum",
     "LocalPersonaIdentityAdapter",
     "Principal",
@@ -213,7 +208,6 @@ __all__ = [
     "cors_allowlist",
     "dataclass_from_jsonable",
     "enums",
-    "evals",
     "identity",
     "is_loopback_host",
     "netdefaults",
