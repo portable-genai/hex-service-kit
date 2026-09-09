@@ -189,7 +189,6 @@ principal = principal_from_iap_claims(verified_claims, policy)
 | `assertion` | `assertion_algorithm`, `require_pinned_algorithm`, `require_claims`: pins what a signed assertion may be BEFORE a verifier is asked to check it | stdlib |
 | `federation` | `select_assertion` (which header carries it, and what a broker must strip), `FederationPolicy`, `principal_from_iap_claims`, `sanitize_request_headers` / `sanitize_response_headers`, `build_injection_plan` | stdlib |
 | `capabilities` | `Capability`, `CapabilityManifest`, `CapabilityMode`, `AssuranceLevel`: the vendor-neutral runtime capability and assurance manifest | stdlib |
-| `evals` | `EvalRunEnvelope`, `EvalMetricEvidence`, `EvalRunStatus`: the portable evaluation-run evidence envelope | stdlib |
 | `observability` | `ObservabilityTracerPort` and `TokenUsage`, defined once so the port and the value type cannot drift apart | stdlib |
 | `logging` | `CloudLoggingFormatter`, `configure_logging`: JSON that Cloud Logging parses natively, plain text on a laptop | stdlib |
 | `plugin` | `PluginSpec`, `render`, `discover_skills`, `load_schema`: renders an Agent Plugins 1.0.0 directory from what a repo already declares. **Packaging is stdlib**, so a repo renders its plugin inside the offline gate | stdlib |
