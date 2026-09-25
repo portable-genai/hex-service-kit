@@ -27,6 +27,7 @@ from __future__ import annotations
 import hmac
 import os
 from collections.abc import Callable
+from typing import Any
 
 try:
     from fastapi import HTTPException, Request, status
@@ -40,6 +41,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from . import provenance
 from .assertion import require_claims, require_pinned_algorithm
 from .identity import IdentityError, IdentityPort, Principal, RequestContext
 from .netdefaults import is_loopback_host, read_env_setting
@@ -439,3 +441,48 @@ def add_security_headers(
         return response
 
     app.add_middleware(BaseHTTPMiddleware, dispatch=_dispatch)
+
+
+# --------------------------------------------------------------------------- #
+# Answer provenance: the model that answered, and whether it searched
+# --------------------------------------------------------------------------- #
+class _AnswerProvenanceMiddleware:
+    """Raw ASGI: open a provenance record per request, emit it as headers on the response.
+
+    Raw rather than ``BaseHTTPMiddleware`` so the record is in place before the endpoint runs
+    and the headers are added to the response start message itself, streaming included.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        with provenance.scope() as record:
+
+            async def _send(message: Any) -> None:
+                if message["type"] == "http.response.start":
+                    headers = list(message.get("headers") or [])
+                    for name, value in record.headers().items():
+                        headers.append((name.lower().encode("latin-1"), value.encode("latin-1")))
+                    headers.append((b"access-control-expose-headers", _EXPOSED))
+                    message = {**message, "headers": headers}
+                await send(message)
+
+            await self.app(scope, receive, _send)
+
+
+_EXPOSED = f"{provenance.ANSWERED_BY_HEADER}, {provenance.SEARCH_USED_HEADER}".encode("latin-1")
+
+
+def install_answer_provenance(app: Starlette) -> None:
+    """Emit ``X-Answered-By`` / ``X-Search-Used`` for whatever the model adapters noted.
+
+    Adapters call :func:`hex_service_kit.provenance.note_model` (the kit's local-model client
+    does it for them) and :func:`hex_service_kit.provenance.note_search`; a request that noted
+    nothing gets neither header. The console's pills read these, so what a pill names is what
+    answered, never what configuration says would.
+    """
+    app.add_middleware(_AnswerProvenanceMiddleware)
