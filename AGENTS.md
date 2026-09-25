@@ -42,6 +42,7 @@ pytest tests/test_web.py -k s2s -q
 - **The core is pure stdlib, zero runtime dependencies.** Every module except
   `hex_service_kit.web` imports cleanly with nothing installed: `identity`, `s2s`, `netdefaults`,
   `enums`, `serialization`, `audit`, `assertion`, `federation`, `capabilities`, `evals`,
+  `localmodel`,
   `observability`, `logging`, `plugin`, `tracing` and `mcpserve`. `dependencies = []` in
   pyproject is deliberate. The list is stated in full rather than as an example, because naming
   a subset invites the reader to assume the rest are not stdlib and to add a dependency to one
@@ -134,6 +135,14 @@ Ten core modules in `src/hex_service_kit/`. Core (stdlib) is re-exported flat fr
   adds exactly two READ-ONLY evidence tools, `audit_verify` and `audit_export`; there is no
   write tool and there should not be, because appending to the trail is something a service does
   as it works, not something a caller asks for. `interop` extra, lazy imports, not re-exported.
+
+- **localmodel.py** - the one client every laptop `live` profile uses to reach the shared
+  local open-weight model over an OpenAI-compatible endpoint. Local servers enforce no schema
+  and report no usage, so the schema goes in the prompt, the answer is fence-stripped, parsed
+  and checked against a stdlib JSON Schema subset here, a failure is fed back with the problem
+  named and retried, and `usage` is `None` rather than a fabricated zero. Every failure carries
+  the two-line start recipe. `audit.set_aside` is its laptop sibling: a damaged or rolled-back
+  laptop ledger is moved aside (never deleted) and a fresh one starts, rather than refusing.
 
 - **web.py** - the FastAPI glue. The provider callables (which IdentityPort, which profile) are
   arguments so this package never depends on a consumer's DI container. Google OIDC libs are

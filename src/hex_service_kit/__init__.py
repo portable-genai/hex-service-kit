@@ -54,6 +54,7 @@ from . import (
     enums,
     federation,
     identity,
+    localmodel,
     logging,
     netdefaults,
     observability,
@@ -80,6 +81,7 @@ from .audit import (
     HashChainedAuditLog,
     JsonlFileAuditLog,
     scan_chain_rows,
+    set_aside,
 )
 from .capabilities import AssuranceLevel, Capability, CapabilityManifest, CapabilityMode
 from .enums import LenientStrEnum, StrEnum
@@ -111,6 +113,13 @@ from .identity import (
     Principal,
     RequestContext,
 )
+from .localmodel import (
+    LocalCompletion,
+    LocalModelClient,
+    LocalModelOutputError,
+    LocalModelSettings,
+    LocalModelUnavailable,
+)
 from .logging import CloudLoggingFormatter, configure_logging
 from .netdefaults import (
     ConfiguredEmptyError,
@@ -141,7 +150,7 @@ from .plugin import (
 from .s2s import client_headers, validate_base_url
 from .serialization import dataclass_from_jsonable, to_jsonable
 
-__version__ = "0.0.8"
+__version__ = "0.0.9"
 
 __all__ = [
     "federation",
@@ -210,6 +219,13 @@ __all__ = [
     "enums",
     "identity",
     "is_loopback_host",
+    "localmodel",
+    "LocalCompletion",
+    "LocalModelClient",
+    "LocalModelOutputError",
+    "LocalModelSettings",
+    "LocalModelUnavailable",
+    "set_aside",
     "netdefaults",
     "plugin",
     "Author",

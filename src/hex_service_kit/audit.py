@@ -633,6 +633,42 @@ class AnchoredChainStore:
         return anchor, imported
 
 
+def set_aside(paths: Sequence[str | Path], *, reason: str) -> list[Path]:
+    """Move a laptop store's files out of the way, never delete them, and say so.
+
+    The laptop rule is that a demo reset must never be refused by integrity machinery: a
+    ledger that is damaged, missing its witness, or rolled back behind it is set aside and a
+    fresh one starts, with a warning naming where the old one went. Nothing is deleted, so the
+    set-aside trail still verifies with :meth:`AnchoredChainStore.verify_chain` (and over MCP
+    with ``audit_verify``) exactly as it did, and the fresh store is chained from genesis.
+
+    A managed profile never calls this: there the same divergence is a refusal, because the
+    store is evidence rather than a demo's scratch state. Each existing path in ``paths`` (a
+    database, its ``-wal``/``-shm`` sidecars, an anchor, a key, a checkpoint) is renamed to
+    ``<name>.set-aside-<UTC timestamp>`` in place; absent paths are skipped. Returns the new
+    paths.
+    """
+    import datetime as _dt
+    import logging as _logging
+
+    stamp = _dt.datetime.now(_dt.UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    moved: list[Path] = []
+    for raw in paths:
+        source = Path(raw)
+        if not source.exists():
+            continue
+        target = source.with_name(f"{source.name}.set-aside-{stamp}")
+        source.rename(target)
+        moved.append(target)
+    if moved:
+        _logging.getLogger(__name__).warning(
+            "laptop audit store set aside and restarted fresh (%s); the old files are kept at %s",
+            reason,
+            ", ".join(str(p) for p in moved),
+        )
+    return moved
+
+
 class HashChainedAuditLog(AnchoredChainStore):
     """Append-only, hash-chained audit store for already-redacted events, kept in SQLite.
 
