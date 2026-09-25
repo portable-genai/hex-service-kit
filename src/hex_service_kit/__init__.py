@@ -59,6 +59,7 @@ from . import (
     netdefaults,
     observability,
     plugin,
+    provenance,
     s2s,
     serialization,
 )
@@ -150,7 +151,7 @@ from .plugin import (
 from .s2s import client_headers, validate_base_url
 from .serialization import dataclass_from_jsonable, to_jsonable
 
-__version__ = "0.0.9"
+__version__ = "0.0.10"
 
 __all__ = [
     "federation",
@@ -220,6 +221,7 @@ __all__ = [
     "identity",
     "is_loopback_host",
     "localmodel",
+    "provenance",
     "LocalCompletion",
     "LocalModelClient",
     "LocalModelOutputError",

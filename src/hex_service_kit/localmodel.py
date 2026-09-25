@@ -37,6 +37,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from . import provenance
 from .netdefaults import read_env_setting
 from .observability import TokenUsage
 
@@ -234,11 +235,9 @@ class LocalModelClient:
             )
         message = choices[0].get("message") or {}
         text = str(message.get("content") or "")
-        return LocalCompletion(
-            text=text,
-            model=str(body.get("model") or self._settings.model),
-            usage=_usage(body.get("usage")),
-        )
+        answered_by = str(body.get("model") or self._settings.model)
+        provenance.note_model(answered_by)
+        return LocalCompletion(text=text, model=answered_by, usage=_usage(body.get("usage")))
 
     def complete_json(
         self,
