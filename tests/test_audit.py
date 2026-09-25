@@ -467,3 +467,29 @@ def test_external_anchor_detects_tail_truncation(tmp_path: Path):
     report = audit.verify_chain()
     assert not report.ok
     assert "anchor" in report.detail
+
+
+def test_set_aside_moves_a_laptop_store_and_the_old_trail_still_verifies(
+    tmp_path: Path,
+) -> None:
+    from hex_service_kit import set_aside
+
+    db = tmp_path / "audit.db"
+    anchor = tmp_path / "anchor.json"
+    log = HashChainedAuditLog(str(db), anchor_path=str(anchor))
+    log.record({"event": "one"})
+    log.record({"event": "two"})
+    anchor.unlink()  # a missing witness: the append path would now refuse
+    with pytest.raises(AuditChainError):
+        log.record({"event": "three"})
+
+    moved = set_aside([db, anchor, tmp_path / "absent.db"], reason="anchor missing")
+    assert len(moved) == 1 and moved[0].name.startswith("audit.db.set-aside-")
+    assert not db.exists()
+    kept = HashChainedAuditLog(str(moved[0]))
+    assert kept.verify_chain().ok
+    assert len(kept.read_all()) == 2
+
+    fresh = HashChainedAuditLog(str(db), anchor_path=str(anchor))
+    fresh.record({"event": "after reset"})
+    assert fresh.verify_chain().ok
