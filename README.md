@@ -192,7 +192,7 @@ principal = principal_from_iap_claims(verified_claims, policy)
 | `observability` | `ObservabilityTracerPort` and `TokenUsage`, defined once so the port and the value type cannot drift apart | stdlib |
 | `logging` | `CloudLoggingFormatter`, `configure_logging`: JSON that Cloud Logging parses natively, plain text on a laptop | stdlib |
 | `plugin` | `PluginSpec`, `render`, `discover_skills`, `load_schema`: renders an Agent Plugins 1.0.0 directory from what a repo already declares. **Packaging is stdlib**, so a repo renders its plugin inside the offline gate | stdlib |
-| `tracing` | `build_tracer`: the OpenTelemetry tracer, built once here rather than copied into every repository | `otel` extra |
+| `tracing` | `build_tracer`: the `gcp` profile's OpenTelemetry tracer, built once here rather than copied into every repository. It exports OTLP only, through the agent-observability collector that redacts GenAI content, and refuses to build when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset or empty (`CollectorEndpointRequiredError`, `ConfiguredEmptyError`) | `otel` extra |
 | `mcpserve` | `bind` (refuses a catalog/handler mismatch in BOTH directions), `build_server`, `run_stdio`, `streamable_http_app`, `audit_tools`, `is_modern_era` | `interop` extra |
 | `web` | `make_get_principal`, `make_require_service_caller`, `add_security_headers`, `add_loopback_exposure_guard` | `fastapi` extra |
 

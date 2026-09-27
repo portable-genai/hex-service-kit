@@ -6,26 +6,31 @@ function that needs it, so this module is importable with no SDK present and the
 SDK-free gate keeps passing. That is the same discipline the ``gcp`` adapters follow in every
 catalog repo, and it is load-bearing rather than stylistic.
 
-**Where spans go, and why one adapter decides it.** A repository may export straight to Cloud Trace,
-or it may export OTLP to the agent-observability collector, which redacts and aggregates before
-forwarding. Both are supported deployments: agent-observability's own README calls
-direct-to-Cloud-Trace the supported default for a vertical with no collector deployed, and the
-collector the aggregation path. So the choice is a deployment fact, not a code fact, and it is read
-from ``OTEL_EXPORTER_OTLP_ENDPOINT`` by ONE adapter rather than modelled as two adapters behind two
-profiles. Doing it with profiles would have meant adding a fourth member to every repo's
-``KNOWN_PROFILES``, and the binding table refuses unless every port binds every profile, so it would
-have cost several hundred alias bindings across the fleet to express one optional endpoint.
+**Where spans go: to the collector, and nowhere else.** Spans are exported OTLP to the
+agent-observability collector, which deletes GenAI content attributes before anything reaches a
+Google sink. There is no direct-to-Cloud-Trace path. There used to be one, taken whenever
+``OTEL_EXPORTER_OTLP_ENDPOINT`` was unset, and it was the default: every deployment that had not
+wired the endpoint exported prompt and response content around the redaction without anyone
+choosing to. Decision D1 of the guardrail/registry/observability plan (2026-09-26) removed it, so
+:func:`build_tracer` refuses an unset endpoint exactly as it refuses an emptied one.
 
-**The endpoint is read in three states.** The implementation this was promoted from used
-``os.environ.get(name, "")``, which makes unset and set-and-empty the same answer. It survived
-there because that repository has a narrow two-variable three-state test rather than the
-AST-walking guard the template ships, and the guard would have failed it. An operator who blanks
-the variable has expressed an intent, so it refuses rather than silently falling back.
+``build_tracer`` is the ``gcp`` profile's tracer: the ``gcp`` tracer adapter in every catalog
+repository is its only caller, while ``local`` binds a no-op and ``onprem`` binds its own. So the
+refusal applies under ``gcp`` and nowhere else, without the kit having to be told the profile. The
+cost is accepted, not incidental: a ``gcp`` deployment now depends on the collector being up and
+callable by its runtime account, and the endpoint has to be wired before the first span.
 
-**An exporter must never take a request down.** Tracing is not essential to correctness. A failure
-to set up, export or flush is logged and swallowed; an exception raised by the traced body always
-propagates. The two are easy to conflate in a context manager, so :func:`build_tracer` hand-rolls
-the enter and exit rather than relying on ``@contextmanager`` swallowing behaviour.
+**The endpoint is read in three states, and only one of them is accepted.** Unset names no
+collector, so it is refused; set-and-empty is an operator's expressed intent that also names no
+collector, so it is refused with its own message; only a value is used. The implementation this
+was promoted from used ``os.environ.get(name, "")``, which made the first two the same answer.
+
+**An exporter must never take a request down.** Tracing is not essential to correctness. A missing
+endpoint is not such a failure: it is a deployment that would leak, and it is refused when the
+tracer is built. A failure to set up, export or flush is logged and swallowed; an exception raised
+by the traced body always propagates. The two are easy to conflate in a context manager, so
+:func:`build_tracer` hand-rolls the enter and exit rather than relying on ``@contextmanager``
+swallowing behaviour.
 """
 
 from __future__ import annotations
@@ -62,16 +67,33 @@ def _trace_endpoint(endpoint: str) -> str:
     return trimmed if trimmed.endswith(_TRACES_PATH) else f"{trimmed}{_TRACES_PATH}"
 
 
+class CollectorEndpointRequiredError(RuntimeError):
+    """Raised when no collector endpoint is configured for a deployed tracer.
+
+    Unset used to mean "export straight to Cloud Trace", which exported GenAI content around the
+    collector's redaction by default. It is refused instead, so the only way a span leaves the
+    process is through the collector.
+    """
+
+
 def _resolve_endpoint() -> str:
-    """The configured collector endpoint, or ``""`` for direct Cloud Trace export."""
+    """The configured collector's OTLP/HTTP traces endpoint. Raises when none is configured."""
     setting = read_env_setting(ENDPOINT_ENV)
     if setting.is_configured_empty:
         raise ConfiguredEmptyError(
             f"{ENDPOINT_ENV} is set but empty. Emptying it is an expressed intent and it names no "
-            f"collector, so it is refused rather than treated as unset. UNSET the variable to "
-            f"export straight to Cloud Trace, or give it the collector URL."
+            f"collector, so it is refused. Give it the agent-observability collector URL (its "
+            f"`otlp_endpoint` Terraform output)."
         )
-    return _trace_endpoint(setting.value) if setting.has_value else ""
+    if not setting.has_value:
+        raise CollectorEndpointRequiredError(
+            f"{ENDPOINT_ENV} is unset. Spans are exported only through the agent-observability "
+            f"collector, which redacts GenAI content before any Google sink; there is no direct "
+            f"Cloud Trace path to fall back to. Set it to the collector URL (its `otlp_endpoint` "
+            f"Terraform output) and grant this runtime account `roles/run.invoker` on the "
+            f"collector (`otel_caller_service_accounts`)."
+        )
+    return _trace_endpoint(setting.value)
 
 
 def _wants_cloud_run_auth(endpoint: str) -> bool:
@@ -120,9 +142,8 @@ def _cloud_run_session(endpoint: str) -> Any:
 class _Tracer:
     """Binds :class:`~hex_service_kit.observability.ObservabilityTracerPort` to OpenTelemetry."""
 
-    def __init__(self, *, service: str, project: str, endpoint: str) -> None:
+    def __init__(self, *, service: str, endpoint: str) -> None:
         self._service = service
-        self._project = project
         self._endpoint = endpoint
         self._otel_tracer: Any = None
         self._setup_warned = False
@@ -147,25 +168,17 @@ class _Tracer:
             return self._otel_tracer
 
         import opentelemetry.trace as trace  # noqa: PLC0415
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (  # noqa: PLC0415
+            OTLPSpanExporter,
+        )
         from opentelemetry.sdk.resources import Resource  # noqa: PLC0415
         from opentelemetry.sdk.trace import TracerProvider  # noqa: PLC0415
         from opentelemetry.sdk.trace.export import BatchSpanProcessor  # noqa: PLC0415
 
-        if self._endpoint:
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (  # noqa: PLC0415
-                OTLPSpanExporter,
-            )
-
-            session = (
-                _cloud_run_session(self._endpoint)
-                if _wants_cloud_run_auth(self._endpoint)
-                else None
-            )
-            exporter: Any = OTLPSpanExporter(endpoint=self._endpoint, session=session)
-        else:
-            from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter  # noqa: PLC0415
-
-            exporter = CloudTraceSpanExporter(project_id=self._project)
+        session = (
+            _cloud_run_session(self._endpoint) if _wants_cloud_run_auth(self._endpoint) else None
+        )
+        exporter = OTLPSpanExporter(endpoint=self._endpoint, session=session)
 
         # A resource is what makes a span attributable to a service in the Agent Observability
         # topology view. Without it every catalog service renders as one anonymous node.
@@ -230,23 +243,24 @@ class _Span:
         return False
 
 
-def build_tracer(*, service: str, project: str) -> ObservabilityTracerPort:
-    """Build the tracer for a deployed profile.
+def build_tracer(*, service: str) -> ObservabilityTracerPort:
+    """Build the ``gcp`` profile's tracer, which exports only through the collector.
 
     ``service`` names the service in the trace backend and becomes ``service.name`` on every span.
-    ``project`` is only used for direct Cloud Trace export; it is ignored when a collector endpoint
-    is configured, because the collector owns the destination project.
+    There is no project argument: the collector owns the destination project.
 
-    Raises :class:`~hex_service_kit.netdefaults.ConfiguredEmptyError` if the endpoint variable is
-    present but empty. Everything else is deferred: no SDK is imported and no exporter is
-    constructed until the first span, so building a container never needs the network.
+    Raises :class:`CollectorEndpointRequiredError` if ``OTEL_EXPORTER_OTLP_ENDPOINT`` is unset and
+    :class:`~hex_service_kit.netdefaults.ConfiguredEmptyError` if it is present but empty (decision
+    D1). Everything else is deferred: no SDK is imported and no exporter is constructed until the
+    first span, so building a container never needs the network.
     """
-    return _Tracer(service=service, project=project, endpoint=_resolve_endpoint())
+    return _Tracer(service=service, endpoint=_resolve_endpoint())
 
 
 __all__ = [
     "AUDIENCE_ENV",
     "CLOUD_RUN_AUTH_ENV",
     "ENDPOINT_ENV",
+    "CollectorEndpointRequiredError",
     "build_tracer",
 ]

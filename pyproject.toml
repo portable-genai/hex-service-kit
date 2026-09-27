@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hex-service-kit"
-version = "0.0.10"
+version = "0.0.11"
 description = "The shared service spine for hexagonal agent repos: a server-verified identity layer (Principal / IdentityPort / seeded dev personas that discard the client-asserted actor), service-to-service transport hardening (https-only base URLs, bearer + HMAC-signed actor propagation, fail-closed caller authentication), fail-closed network defaults (loopback bind with an explicit insecure-demo guard, a CORS allowlist that can never fall back to '*'), and kernel primitives (a StrEnum base and an append-only hash-chained WORM audit log). Pure standard library core, with an optional FastAPI integration layer."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -38,10 +38,10 @@ dependencies = []
 fastapi = ["fastapi>=0.110", "starlette>=0.36"]
 # The OpenTelemetry tracer implementation in `tracing.py`. The tracer PORT and the log
 # formatter stay in the core, so a repo can bind and log with none of this installed; only
-# a deployed profile that actually exports spans needs the extra.
+# a deployed profile that actually exports spans needs the extra. OTLP only: spans leave
+# through the agent-observability collector, so there is no Cloud Trace exporter to carry.
 otel = [
   "opentelemetry-sdk>=1.44",
-  "opentelemetry-exporter-gcp-trace>=1.15",
   "opentelemetry-exporter-otlp-proto-http>=1.44",
   "requests>=2.31",           # authenticated OTLP session for a private Cloud Run collector
   "google-auth>=2.30",        # mints the per-export ID token that collector requires
