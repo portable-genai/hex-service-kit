@@ -148,3 +148,31 @@ def test_an_unavailable_tracer_warns_once_not_once_per_span(
                 pass
     warnings = [r for r in caplog.records if "tracing is unavailable" in r.getMessage()]
     assert len(warnings) == 1, f"expected one warning, got {len(warnings)}"
+
+
+@pytest.mark.usefixtures("collector")
+def test_token_usage_carries_the_genai_conventions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The model call's span names the operation and the provider, not only the model.
+
+    v0.0.11 set ``gen_ai.request.model`` and the usage counts and stopped there, so a trace
+    backend could not group calls by operation or provider as the GenAI conventions intend.
+    """
+    import opentelemetry.trace as trace
+
+    from hex_service_kit.tracing import GEN_AI_OPERATION, GEN_AI_PROVIDER
+
+    recorded: dict[str, object] = {}
+
+    class _Span:
+        def set_attribute(self, key: str, value: object) -> None:
+            recorded[key] = value
+
+    monkeypatch.setattr(trace, "get_current_span", lambda: _Span())
+    tracer = build_tracer(service="doc1")
+    tracer.record_token_usage(TokenUsage(input_tokens=10, output_tokens=2), "gemini-3.5-flash")
+
+    assert recorded["gen_ai.operation.name"] == GEN_AI_OPERATION == "generate_content"
+    assert recorded["gen_ai.provider.name"] == GEN_AI_PROVIDER == "gcp.vertex_ai"
+    assert recorded["gen_ai.request.model"] == "gemini-3.5-flash"
+    assert recorded["gen_ai.usage.input_tokens"] == 10
+    assert recorded["gen_ai.usage.output_tokens"] == 2
