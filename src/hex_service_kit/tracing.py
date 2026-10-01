@@ -52,6 +52,12 @@ ENDPOINT_ENV: Final = "OTEL_EXPORTER_OTLP_ENDPOINT"
 AUDIENCE_ENV: Final = "OTEL_EXPORTER_OTLP_AUDIENCE"
 #: Force the Cloud Run auth path on or off instead of inferring it from the hostname.
 CLOUD_RUN_AUTH_ENV: Final = "OTEL_EXPORTER_OTLP_CLOUD_RUN_AUTH"
+#: OpenTelemetry GenAI semantic conventions for a model call's span. This tracer is the ``gcp``
+#: profile's, and that profile calls models only through Vertex AI in the deployment's region
+#: (Gemini, and Claude when the router admits it), so the provider is a fact of the profile
+#: rather than of the model id. Every call that reports usage is a ``generate_content`` call.
+GEN_AI_PROVIDER: Final = "gcp.vertex_ai"
+GEN_AI_OPERATION: Final = "generate_content"
 
 _TRUTHY: Final = frozenset({"1", "true", "yes"})
 _TRACES_PATH: Final = "/v1/traces"
@@ -196,6 +202,8 @@ class _Tracer:
             import opentelemetry.trace as trace  # noqa: PLC0415
 
             current = trace.get_current_span()
+            current.set_attribute("gen_ai.operation.name", GEN_AI_OPERATION)
+            current.set_attribute("gen_ai.provider.name", GEN_AI_PROVIDER)
             current.set_attribute("gen_ai.request.model", model)
             current.set_attribute("gen_ai.usage.input_tokens", usage.input_tokens)
             current.set_attribute("gen_ai.usage.output_tokens", usage.output_tokens)
@@ -261,6 +269,8 @@ __all__ = [
     "AUDIENCE_ENV",
     "CLOUD_RUN_AUTH_ENV",
     "ENDPOINT_ENV",
+    "GEN_AI_OPERATION",
+    "GEN_AI_PROVIDER",
     "CollectorEndpointRequiredError",
     "build_tracer",
 ]

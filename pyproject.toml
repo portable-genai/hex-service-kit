@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hex-service-kit"
-version = "0.0.11"
+version = "0.0.12"
 description = "The shared service spine for hexagonal agent repos: a server-verified identity layer (Principal / IdentityPort / seeded dev personas that discard the client-asserted actor), service-to-service transport hardening (https-only base URLs, bearer + HMAC-signed actor propagation, fail-closed caller authentication), fail-closed network defaults (loopback bind with an explicit insecure-demo guard, a CORS allowlist that can never fall back to '*'), and kernel primitives (a StrEnum base and an append-only hash-chained WORM audit log). Pure standard library core, with an optional FastAPI integration layer."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -40,9 +40,12 @@ fastapi = ["fastapi>=0.110", "starlette>=0.36"]
 # formatter stay in the core, so a repo can bind and log with none of this installed; only
 # a deployed profile that actually exports spans needs the extra. OTLP only: spans leave
 # through the agent-observability collector, so there is no Cloud Trace exporter to carry.
+# The floors are 1.42, not newer: google-adk caps opentelemetry-sdk at <=1.42.1, and a floor
+# above that cap made this extra uninstallable beside it, so the apps listed the tracer's
+# dependencies by hand instead of taking the extra.
 otel = [
-  "opentelemetry-sdk>=1.44",
-  "opentelemetry-exporter-otlp-proto-http>=1.44",
+  "opentelemetry-sdk>=1.42",
+  "opentelemetry-exporter-otlp-proto-http>=1.42",
   "requests>=2.31",           # authenticated OTLP session for a private Cloud Run collector
   "google-auth>=2.30",        # mints the per-export ID token that collector requires
 ]
